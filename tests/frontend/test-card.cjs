@@ -20,8 +20,8 @@ const server = http.createServer((req,res) => {
     page.on('pageerror',e=>errors.push(e.message));
     await page.route('**/*',route=>route.request().url().startsWith(url)?route.continue():route.abort());
     await page.clock.install({time:new Date('2026-10-26T09:30:00Z')});
-    await page.goto(url+query);await page.locator('[data-action=refresh]').waitFor();
-    await page.waitForFunction(()=>!demoCard._busy);
+    await page.goto(url+query);
+    await page.waitForFunction(()=>window.demoCard&&demoCard._attempted&&!demoCard._busy);
     try{await fn(page);assert.deepEqual(errors,[]);tests.push({name,passed:true});}
     catch(e){tests.push({name,passed:false,error:e.message});}
     await page.close();
@@ -260,6 +260,28 @@ const server = http.createServer((req,res) => {
     assert.match(await p.locator('.timeline-detail').innerText(),/00:00.*20:00/);
     assert.equal(await p.locator('.day-segment[aria-pressed=true]').getAttribute('data-index'),'0');
   },'?today=1');
+  await test('standalone today defaults to only the timeline and hour axis',async p=>{
+    assert.equal(await p.locator('.day-segment').count(),7);
+    assert.equal(await p.locator('header,h2,.today-summary,.legend,.timeline-detail,footer,.period-list').count(),0);
+    assert.equal(await p.locator('.time-cursor').count(),1);
+    assert.match(await p.locator('.day-axis').innerText(),/00:00[\s\S]*24:00/);
+    assert.ok(await p.locator('bticino-today-card').evaluate(el=>el.clientHeight)<120);
+    await p.locator('bticino-today-card').screenshot({path:path.join(out,'bticino-today-strip-desktop.png')});
+  },'?today=1&compact=1');
+  await test('dashboard strip fits mobile and inspecting it sends no commands',async p=>{
+    await p.setViewportSize({width:390,height:300});
+    const count=await p.evaluate(()=>demoCalls.length);await p.locator('.day-segment').nth(6).click();
+    assert.match(await p.locator('.day-segment').nth(6).getAttribute('aria-label'),/22:00.*24:00/);
+    assert.equal(await p.evaluate(()=>demoCalls.length),count);
+    assert.equal(await p.locator('bticino-today-card').evaluate(el=>el.shadowRoot.querySelector('ha-card').scrollWidth<=el.clientWidth),true);
+    await p.locator('bticino-today-card').screenshot({path:path.join(out,'bticino-today-strip-mobile.png')});
+  },'?today=1&compact=1&dark=1');
+  await test('dashboard strip signals a manual override without extra panels',async p=>{
+    await p.evaluate(()=>{demoHass.states['climate.atrio'].attributes.program_mode='MANUAL';demoCard.hass=demoHass});
+    assert.equal(await p.locator('.time-cursor,.day-segment.current').count(),0);
+    assert.match(await p.locator('.strip-status').getAttribute('aria-label'),/sospeso/);
+    assert.equal(await p.locator('.today-summary').count(),0);
+  },'?today=1&compact=1');
   await browser.close();server.close();
   fs.writeFileSync(path.join(out,'bticino-programs-ui-test-results.json'),JSON.stringify(tests,null,2));
   console.log(JSON.stringify(tests,null,2));if(tests.some(t=>!t.passed))process.exitCode=1;

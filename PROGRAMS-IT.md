@@ -1,4 +1,4 @@
-# Gestione programmi BTicino — beta 1.3.0-beta.3
+# Gestione programmi BTicino — beta 1.3.0-beta.4
 
 Questa versione aggiunge un editor grafico e una selezione del programma attivo. I programmi sono salvati nel termostato: HA serve per modificarli o selezionarli, non per inviare una temperatura a ogni fascia.
 
@@ -10,7 +10,7 @@ Questa versione aggiunge un editor grafico e una selezione del programma attivo.
 4. Apri **Impostazioni → Plance → menu in alto a destra → Risorse** e aggiungi:
 
    ```text
-   /bticino_thermostat_static/bticino-programs-card.js?v=1.3.0-beta.3
+   /bticino_thermostat_static/bticino-programs-card.js?v=1.3.0-beta.4
    ```
 
    Scegli il tipo **Modulo JavaScript**. Se la gestione delle risorse è configurata in YAML, aggiungi lo stesso URL come risorsa `module` nella configurazione esistente.
@@ -47,9 +47,11 @@ type: custom:bticino-today-card
 entity: climate.il_tuo_termostato
 ```
 
-Mostra una barra del tempo 00:00-24:00 con fasce colorate proporzionali alla durata, temperature e cursore dell'ora attuale. Tocca una fascia per vedere gli orari precisi; l'elenco testuale resta apribile sotto la barra. Mostra inoltre il programma attivo, la fascia prevista adesso, la prossima e l'obiettivo attuale riportato dal termostato. La fascia prevista usa il fuso orario configurato in Home Assistant e l'orologio del browser: non è una conferma del relè o dell'orologio interno del dispositivo. La schermata aggiorna l'orario ogni 30 secondi, senza inviare comandi al termostato; a mezzanotte cambia giorno automaticamente.
+La scheda autonoma mostra **solo la barra del tempo 00:00-24:00**, con fasce colorate proporzionali alla durata, temperature e cursore dell'ora attuale. Non contiene titolo, riepiloghi o elenco delle fasce: è pensata per essere inserita accanto alle altre schede della dashboard. Gli orari precisi sono disponibili nella descrizione di ogni segmento, passando il mouse o tramite lettore di schermo.
 
-Durante Manuale, Boost, Protezione o Off, il programma non viene mostrato come in esecuzione. Se il dispositivo è scollegato, le eventuali fasce memorizzate restano consultabili ma non sono evidenziate come attive. Premi **Aggiorna** per rileggere modifiche fatte nell'app. La vista Oggi usa sempre il programma salvato e attivo, anche se stai modificando una bozza diversa nell'editor.
+La vista completa resta nella scheda Oggi dell'editor. Per abilitarla anche nella scheda autonoma, aggiungi facoltativamente `show_details: true` alla configurazione YAML. La fascia prevista usa il fuso orario configurato in Home Assistant e l'orologio del browser: non è una conferma del relè o dell'orologio interno del dispositivo. La schermata aggiorna l'orario ogni 30 secondi, senza inviare comandi al termostato; a mezzanotte cambia giorno automaticamente.
+
+Durante Manuale, Boost, Protezione o Off, il programma non viene mostrato come in esecuzione. Se il dispositivo è scollegato, le eventuali fasce memorizzate restano consultabili ma non sono evidenziate come attive. Un piccolo indicatore segnala lo stato nella barra. Usa **Aggiorna** nell'editor o il pulsante nativo **Aggiorna programmi** per rileggere modifiche fatte nell'app. La vista Oggi usa sempre il programma salvato e attivo, anche se stai modificando una bozza diversa nell'editor.
 
 ## Fasce e livelli
 

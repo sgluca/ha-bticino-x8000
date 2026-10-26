@@ -291,11 +291,11 @@ class BticinoProgramsCard extends HTMLElement {
   _periods(slots, current = -1) {
     return `<ol class="periods">${slots.map((slot, i) => `<li class="period ${i === current ? "current" : ""}"><span class="period-time">${esc(slot.time)} <span>–</span> ${esc(slots[i + 1]?.time || "24:00")}</span><strong class="${slot.preset.toLowerCase()}"><i></i>${esc(this._presetLabel(slot.preset))}</strong>${i === current ? `<span class="now-badge">${esc(this._t("now"))}</span>` : ""}</li>`).join("")}</ol>`;
   }
-  _dayTimeline(slots, current, clock) {
+  _dayTimeline(slots, current, clock, compact = false) {
     const inspected = this._inspected;
     const selected = inspected?.number === this._catalog.active_program && inspected.day === clock.day && slots[inspected.index] ? inspected.index : Math.max(0, current);
     const slot = slots[selected], end = slots[selected + 1]?.time || "24:00";
-    return `<div class="day-timeline" aria-label="${esc(this._t("daily"))}">
+    return `<div class="day-timeline ${compact ? "compact-timeline" : ""}" aria-label="${esc(this._t("daily"))}">
       <div class="day-track">${slots.map((s, i) => {
         const width = ((i + 1 < slots.length ? minutes(slots[i + 1].time) : 1440) - minutes(s.time)) / 14.4;
         const label = `${s.time}–${slots[i + 1]?.time || "24:00"} · ${this._presetLabel(s.preset)}`;
@@ -304,10 +304,22 @@ class BticinoProgramsCard extends HTMLElement {
         return `<button class="day-segment ${s.preset.toLowerCase()} ${i === current ? "current" : ""}" data-action="inspect-period" data-index="${i}" style="width:${width}%" aria-label="${esc(label)}" aria-pressed="${selected === i}" title="${esc(label)}"><span>${width >= 10 ? esc(shortLabel) : ""}</span></button>`;
       }).join("")}${current >= 0 ? `<div class="time-cursor" style="left:${clock.minute / 14.4}%"><span style="transform:translateX(${clock.minute < 90 ? "0" : clock.minute > 1350 ? "-100%" : "-50%"})">${esc(clock.time)}</span></div>` : ""}</div>
       <div class="day-axis">${[0, 6, 12, 18, 24].map(h => `<span>${String(h).padStart(2, "0")}:00</span>`).join("")}</div>
-      <div class="timeline-detail" role="status"><span>${esc(slot.time)} – ${esc(end)}</span><strong>${esc(this._presetLabel(slot.preset))}</strong></div>
+      ${compact ? "" : `<div class="timeline-detail" role="status"><span>${esc(slot.time)} – ${esc(end)}</span><strong>${esc(this._presetLabel(slot.preset))}</strong></div>
       <div class="legend">${[...new Set(slots.map(s => s.preset))].map(p => `<span><i class="${p.toLowerCase()}"></i>${esc(this._presetLabel(p))}</span>`).join("")}</div>
-      <details class="period-list"><summary>${this._hass?.language?.startsWith("it") ? "Elenco delle fasce" : "List of periods"}</summary>${this._periods(slots, current)}</details>
+      <details class="period-list"><summary>${this._hass?.language?.startsWith("it") ? "Elenco delle fasce" : "List of periods"}</summary>${this._periods(slots, current)}</details>`}
     </div>`;
+  }
+  _compactTodayMarkup() {
+    const clock = this._clock(), catalog = this._catalog, profile = this._profiles[catalog?.active_program];
+    const slots = profile?.days?.[clock.day] || [];
+    const running = catalog?.connected && catalog.mode === "AUTOMATIC" && this._hass?.states?.[this._config.entity]?.state !== "off";
+    let current = -1;
+    if (running) slots.forEach((slot, i) => { if (minutes(slot.time) <= clock.minute) current = i; });
+    const warning = this._error || (!catalog?.connected ? this._t("offline") : !running ? this._t("paused") : "");
+    const label = `${profile?.name || this._t("today")} · ${this._t("weekdaysLong")[DAYS.indexOf(clock.day)]}${warning ? ` · ${warning}` : ""}`;
+    return `<style>${STYLE}${SIMPLE_STYLE}</style><ha-card class="compact-card" role="group" aria-label="${esc(label)}">
+      ${slots.length ? this._dayTimeline(slots, current, clock, true) : `<p class="empty" role="status">${esc(this._busy ? this._t("loading") : warning || this._t("noActive"))}</p>`}
+      ${warning && slots.length ? `<span class="strip-status" role="img" aria-label="${esc(warning)}" title="${esc(warning)}">!</span>` : ""}</ha-card>`;
   }
   _todayMarkup() {
     const catalog = this._catalog, clock = this._clock(), state = this._hass?.states?.[this._config.entity];
@@ -354,6 +366,7 @@ class BticinoProgramsCard extends HTMLElement {
   }
   _render() {
     if (!this._config) return;
+    if (this._todayOnly && !this._config.show_details) { this.shadowRoot.innerHTML = this._compactTodayMarkup(); return; }
     const catalog = this._catalog, draft = this._draft, disabled = this._busy ? "disabled" : "";
     const records = catalog?.programs || [], active = catalog?.mode === "AUTOMATIC" ? catalog.active_program : null;
     const noSlots = !catalog?.free_slots?.length, admin = this._admin(), todayOnly = this._todayOnly;
@@ -382,6 +395,7 @@ const STYLE = `
 `;
 
 const SIMPLE_STYLE = `
+  .compact-card{position:relative;padding:8px 12px}.compact-timeline.day-timeline{margin-top:23px}.compact-timeline .day-track{height:34px}.compact-timeline .day-axis{margin:9px 0 2px;font-size:9px}.compact-timeline .day-segment{font-size:11px}.strip-status{position:absolute;right:8px;top:5px;color:var(--warning-color);font-size:12px;font-weight:700}
   .day-track>.day-segment:only-of-type{border-radius:9px}
   .day-timeline{margin-top:34px}.day-track{position:relative;display:flex;height:58px;border-radius:9px;background:var(--secondary-background-color)}.day-segment{position:relative;display:flex;align-items:center;justify-content:center;flex-shrink:0;min-width:0;padding:0;border:0;border-right:1px solid var(--ha-card-background,var(--card-background-color));border-radius:0;background:color-mix(in srgb,var(--tone) 48%,var(--ha-card-background,var(--card-background-color)));overflow:hidden;font-size:12px;font-weight:600}.day-segment:first-child{border-radius:9px 0 0 9px}.day-segment:last-of-type{border-radius:0 9px 9px 0}.day-segment:hover:not(:disabled){background:color-mix(in srgb,var(--tone) 65%,var(--ha-card-background,var(--card-background-color)))}.day-segment>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 6px}.day-segment[aria-pressed=true]{box-shadow:inset 0 0 0 2px var(--primary-text-color)}.time-cursor{position:absolute;top:-9px;bottom:-5px;width:2px;background:var(--primary-text-color);pointer-events:none;transform:translateX(-1px)}.time-cursor>span{position:absolute;bottom:calc(100% + 4px);left:0;transform:translateX(-50%);background:var(--primary-text-color);color:var(--card-background-color);border-radius:4px;padding:3px 5px;font-size:10px;white-space:nowrap}.time-cursor>span:after{content:"";position:absolute;left:calc(50% - 3px);top:100%;border:3px solid transparent;border-top-color:var(--primary-text-color)}.day-axis{display:flex;justify-content:space-between;margin:12px 0 16px;font-size:10px;font-variant-numeric:tabular-nums;color:var(--secondary-text-color)}.timeline-detail{display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap;border-radius:8px;background:var(--secondary-background-color);padding:12px;font-size:13px}.timeline-detail>span{font-variant-numeric:tabular-nums;color:var(--secondary-text-color)}.timeline-detail strong{font-weight:550}.day-timeline .legend{margin:14px 0 8px}
   h3{margin:4px 0 0;font-size:18px;overflow-wrap:anywhere}h4{font-size:14px;margin:24px 0 10px}
@@ -396,8 +410,8 @@ const SIMPLE_STYLE = `
 
 class BticinoTodayCard extends BticinoProgramsCard {
   constructor() { super(); this._todayOnly = true; this._view = "today"; }
-  getCardSize() { return 5; }
-  getGridOptions() { return { columns: 12, min_columns: 6, rows: 6, min_rows: 4 }; }
+  getCardSize() { return this._config?.show_details ? 5 : 2; }
+  getGridOptions() { return { columns: 12, min_columns: 6, rows: this._config?.show_details ? 6 : 2, min_rows: 2 }; }
 }
 
 class BticinoProgramsCardEditor extends HTMLElement {

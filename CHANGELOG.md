@@ -1,5 +1,10 @@
 # Development changelog
 
+## 1.3.0-beta.4 — unreleased
+
+- Make the standalone Today card a compact dashboard strip: only the timeline, temperatures and hour axis, with no title or summary panels.
+- Keep the full view in the editor; standalone users can opt in with `show_details: true`.
+
 ## 1.3.0-beta.3 — unreleased
 
 - Display today's schedule as a proportional 00:00–24:00 timeline with preset colors, temperature labels and a current-time cursor.

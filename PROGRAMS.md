@@ -10,7 +10,7 @@ This is a development build based on Mirmanero/ha-bticino-x8000, not an upstream
 2. Replace its complete contents with the development package, including `frontend/`, `program_manager.py`, `program_api.py`, and `button.py`.
 3. Restart Home Assistant. Keep the existing integration/configuration; no PIN/account re-entry or thermostat reset is required. Re-enable the local integration if it was disabled for a separate VPN client.
 4. Under **Settings → Dashboards → Resources**, add:
-   - URL: `/bticino_thermostat_static/bticino-programs-card.js?v=1.3.0-beta.3`
+   - URL: `/bticino_thermostat_static/bticino-programs-card.js?v=1.3.0-beta.4`
    - Type: **JavaScript module**.
 5. Reload the browser, then add **BTicino Programs** from the dashboard card picker and choose the climate entity. The visual configuration editor only needs the thermostat and an optional title.
 
@@ -49,7 +49,9 @@ type: custom:bticino-today-card
 entity: climate.your_thermostat
 ```
 
-The main view is a proportional 00:00-24:00 timeline with colored periods, temperature labels and a current-time cursor. Tap or keyboard-select a period for exact times; the text list is collapsed by default. It shows the saved active program, today's complete periods, the predicted current period, the next period and the target temperature reported by the climate entity. It always uses the active saved profile, independently of the editor's selected program or unsaved draft.
+The standalone card defaults to **only a proportional 00:00-24:00 timeline**, with colored periods, temperature labels and a current-time cursor. No header, summary, legend or period list is shown. Exact ranges are available in segment tooltips and accessible labels. This compact strip is intended for dashboard composition.
+
+The full view remains in the editor's Today tab. Add optional `show_details: true` to the standalone card YAML to enable it there too: it includes current/next-period summaries, the actual target and expandable period list. Both views always use the active saved profile, independently of the editor's selected program or unsaved draft. Use the editor's Refresh or the native Refresh programs button to retrieve external profile edits.
 
 The display uses HA's configured time zone and the browser clock. It updates every 30 seconds and changes weekday at midnight without making device requests. A predicted period is not confirmation of the thermostat's clock or relay state. Manual/Boost/Protection/Off and unavailable states suppress the running highlight and next-period prediction; cached periods may still be shown for reference. Refresh to retrieve external profile edits. Active-program changes reported by the climate entity load the newly selected profile. Removing a card clears its display timer.
 

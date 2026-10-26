@@ -1,6 +1,6 @@
 # BTicino Thermostat for Home Assistant
 
-> **Development build 1.3.0-beta.3:** adds local weekly-program management, a simplified editor and a read-only Today dashboard card. See [program editor installation and limitations](PROGRAMS.md) before testing. This is not an upstream release.
+> **Development build 1.3.0-beta.4:** adds local weekly-program management, a simplified editor and a read-only Today dashboard card. See [program editor installation and limitations](PROGRAMS.md) before testing. This is not an upstream release.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 

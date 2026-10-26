@@ -27,5 +27,5 @@ window.demoHass={language:args.get("lang")||"it",config:{time_zone:"Europe/Rome"
     if(msg.operation==="activate"){demoActive=msg.number;demoHass.states["climate.atrio"].attributes.program_number=msg.number;return catalog()}
     if(msg.operation==="delete"){delete demoPrograms[msg.number];return catalog()}
   }};
-const card=document.createElement(args.has("today")?"bticino-today-card":"bticino-programs-card");card.setConfig({entity:"climate.atrio"});document.querySelector("#mount").append(card);card.hass=demoHass;window.demoCard=card;
+const card=document.createElement(args.has("today")?"bticino-today-card":"bticino-programs-card");card.setConfig({entity:"climate.atrio",show_details:args.has("today")&&!args.has("compact")});document.querySelector("#mount").append(card);card.hass=demoHass;window.demoCard=card;
 </script></html>
