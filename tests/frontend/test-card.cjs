@@ -231,6 +231,35 @@ const server = http.createServer((req,res) => {
     assert.equal(await p.locator('bticino-programs-card').evaluate(el=>el.shadowRoot.querySelector('ha-card').scrollWidth<=el.clientWidth),true);
     await p.locator('bticino-programs-card').screenshot({path:path.join(out,'bticino-programs-editor-mobile.png')});
   });
+  await test('today timeline has proportional segments and a current-time cursor',async p=>{
+    const widths=await p.locator('.day-segment').evaluateAll(els=>els.map(el=>parseFloat(el.style.width)));
+    assert.equal(widths.length,7);assert.ok(Math.abs(widths.reduce((a,b)=>a+b,0)-100)<0.001);
+    assert.equal(widths[0],31.25);
+    assert.equal(await p.locator('.time-cursor').evaluate(el=>parseFloat(el.style.left)),43.75);
+    assert.equal(await p.locator('.period-list').evaluate(el=>el.open),false);
+    assert.equal(await p.locator('.day-segment.current').getAttribute('data-index'),'1');
+  },'?today=1');
+  await test('touching a timeline segment shows its range without any device request',async p=>{
+    const count=await p.evaluate(()=>demoCalls.length);await p.locator('.day-segment').nth(6).click();
+    assert.match(await p.locator('.timeline-detail').innerText(),/22:00.*24:00[\s\S]*Protezione/);
+    assert.equal(await p.locator('.day-segment[aria-pressed=true]').getAttribute('data-index'),'6');
+    assert.equal(await p.evaluate(()=>demoCalls.length),count);
+    await p.locator('.day-segment').nth(1).focus();await p.keyboard.press('Enter');
+    assert.equal(await p.locator('.day-segment').nth(1).evaluate(el=>el.getRootNode().activeElement===el),true);
+  },'?today=1');
+  await test('manual mode retains timeline but suppresses the running cursor',async p=>{
+    await p.evaluate(()=>{demoHass.states['climate.atrio'].attributes.program_mode='MANUAL';demoCard.hass=demoHass});
+    assert.equal(await p.locator('.day-segment').count(),7);
+    assert.equal(await p.locator('.time-cursor').count(),0);
+    assert.equal(await p.locator('.day-segment.current').count(),0);
+  },'?today=1');
+  await test('timeline inspection resets to current period when weekday changes',async p=>{
+    await p.locator('.day-segment').nth(6).click();
+    await p.clock.setSystemTime(new Date('2026-10-26T23:01:00Z'));await p.clock.runFor(30000);
+    assert.equal(await p.locator('.day-segment').count(),3);
+    assert.match(await p.locator('.timeline-detail').innerText(),/00:00.*20:00/);
+    assert.equal(await p.locator('.day-segment[aria-pressed=true]').getAttribute('data-index'),'0');
+  },'?today=1');
   await browser.close();server.close();
   fs.writeFileSync(path.join(out,'bticino-programs-ui-test-results.json'),JSON.stringify(tests,null,2));
   console.log(JSON.stringify(tests,null,2));if(tests.some(t=>!t.passed))process.exitCode=1;

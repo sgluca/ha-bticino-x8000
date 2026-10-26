@@ -236,6 +236,7 @@ class BticinoProgramsCard extends HTMLElement {
     if (action === "refresh") this._load(true);
     else if (action === "view") { this._view = el.dataset.view; this._render(); if (this._view === "today") this._ensureActive(); }
     else if (action === "edit-day") { this._editing = !this._editing; this._render(); }
+    else if (action === "inspect-period") { this._inspected = { number: this._catalog.active_program, day: this._clock().day, index: Number(el.dataset.index) }; this._render(); this.shadowRoot.querySelector(`.day-segment[data-index="${this._inspected.index}"]`)?.focus({ preventScroll: true }); }
     else if (action === "open") this._open(Number(el.dataset.number));
     else if (action === "new") this._new();
     else if (action === "duplicate") this._new(true);
@@ -290,6 +291,24 @@ class BticinoProgramsCard extends HTMLElement {
   _periods(slots, current = -1) {
     return `<ol class="periods">${slots.map((slot, i) => `<li class="period ${i === current ? "current" : ""}"><span class="period-time">${esc(slot.time)} <span>–</span> ${esc(slots[i + 1]?.time || "24:00")}</span><strong class="${slot.preset.toLowerCase()}"><i></i>${esc(this._presetLabel(slot.preset))}</strong>${i === current ? `<span class="now-badge">${esc(this._t("now"))}</span>` : ""}</li>`).join("")}</ol>`;
   }
+  _dayTimeline(slots, current, clock) {
+    const inspected = this._inspected;
+    const selected = inspected?.number === this._catalog.active_program && inspected.day === clock.day && slots[inspected.index] ? inspected.index : Math.max(0, current);
+    const slot = slots[selected], end = slots[selected + 1]?.time || "24:00";
+    return `<div class="day-timeline" aria-label="${esc(this._t("daily"))}">
+      <div class="day-track">${slots.map((s, i) => {
+        const width = ((i + 1 < slots.length ? minutes(slots[i + 1].time) : 1440) - minutes(s.time)) / 14.4;
+        const label = `${s.time}–${slots[i + 1]?.time || "24:00"} · ${this._presetLabel(s.preset)}`;
+        const value = this._catalog.temperatures?.[this._catalog.function === "COOLING" ? "cooling" : "heating"]?.[s.preset];
+        const shortLabel = value == null ? this._presetLabel(s.preset) : `${Number(value).toLocaleString(this._hass?.language)}°`;
+        return `<button class="day-segment ${s.preset.toLowerCase()} ${i === current ? "current" : ""}" data-action="inspect-period" data-index="${i}" style="width:${width}%" aria-label="${esc(label)}" aria-pressed="${selected === i}" title="${esc(label)}"><span>${width >= 10 ? esc(shortLabel) : ""}</span></button>`;
+      }).join("")}${current >= 0 ? `<div class="time-cursor" style="left:${clock.minute / 14.4}%"><span style="transform:translateX(${clock.minute < 90 ? "0" : clock.minute > 1350 ? "-100%" : "-50%"})">${esc(clock.time)}</span></div>` : ""}</div>
+      <div class="day-axis">${[0, 6, 12, 18, 24].map(h => `<span>${String(h).padStart(2, "0")}:00</span>`).join("")}</div>
+      <div class="timeline-detail" role="status"><span>${esc(slot.time)} – ${esc(end)}</span><strong>${esc(this._presetLabel(slot.preset))}</strong></div>
+      <div class="legend">${[...new Set(slots.map(s => s.preset))].map(p => `<span><i class="${p.toLowerCase()}"></i>${esc(this._presetLabel(p))}</span>`).join("")}</div>
+      <details class="period-list"><summary>${this._hass?.language?.startsWith("it") ? "Elenco delle fasce" : "List of periods"}</summary>${this._periods(slots, current)}</details>
+    </div>`;
+  }
   _todayMarkup() {
     const catalog = this._catalog, clock = this._clock(), state = this._hass?.states?.[this._config.entity];
     const profile = this._profiles[catalog?.active_program];
@@ -307,7 +326,7 @@ class BticinoProgramsCard extends HTMLElement {
       ${running && current >= 0 && (next || tomorrow) ? `<div class="next-period"><span class="eyebrow">${esc(this._t("next"))}</span><strong>${esc(this._presetLabel((next || tomorrow).preset))}</strong><span>${next ? esc(next.time) : `${esc(this._t("tomorrow"))} ${esc(tomorrow.time)}`}</span></div>` : ""}</div>
       ${running && target != null ? `<p class="actual-target">${esc(this._t("actual"))}: <strong>${esc(target)} °${esc(this._hass?.config?.unit_system?.temperature || "C")}</strong></p>` : ""}
       <h4>${esc(running ? this._t("daily") : this._t("scheduled"))}</h4>
-      ${slots.length ? this._periods(slots, current) : `<p class="empty">${esc(this._t("empty"))}</p>`}
+      ${slots.length ? this._dayTimeline(slots, current, clock) : `<p class="empty">${esc(this._t("empty"))}</p>`}
       <p class="footnote">${esc(this._t("timezone"))}: ${esc(clock.zone)}. ${esc(this._t("clockNote"))}</p>
       ${catalog?.temperature_warning ? `<p class="footnote">${esc(this._t("uncertain"))}</p>` : ""}
     </section>`;
@@ -363,6 +382,8 @@ const STYLE = `
 `;
 
 const SIMPLE_STYLE = `
+  .day-track>.day-segment:only-of-type{border-radius:9px}
+  .day-timeline{margin-top:34px}.day-track{position:relative;display:flex;height:58px;border-radius:9px;background:var(--secondary-background-color)}.day-segment{position:relative;display:flex;align-items:center;justify-content:center;flex-shrink:0;min-width:0;padding:0;border:0;border-right:1px solid var(--ha-card-background,var(--card-background-color));border-radius:0;background:color-mix(in srgb,var(--tone) 48%,var(--ha-card-background,var(--card-background-color)));overflow:hidden;font-size:12px;font-weight:600}.day-segment:first-child{border-radius:9px 0 0 9px}.day-segment:last-of-type{border-radius:0 9px 9px 0}.day-segment:hover:not(:disabled){background:color-mix(in srgb,var(--tone) 65%,var(--ha-card-background,var(--card-background-color)))}.day-segment>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 6px}.day-segment[aria-pressed=true]{box-shadow:inset 0 0 0 2px var(--primary-text-color)}.time-cursor{position:absolute;top:-9px;bottom:-5px;width:2px;background:var(--primary-text-color);pointer-events:none;transform:translateX(-1px)}.time-cursor>span{position:absolute;bottom:calc(100% + 4px);left:0;transform:translateX(-50%);background:var(--primary-text-color);color:var(--card-background-color);border-radius:4px;padding:3px 5px;font-size:10px;white-space:nowrap}.time-cursor>span:after{content:"";position:absolute;left:calc(50% - 3px);top:100%;border:3px solid transparent;border-top-color:var(--primary-text-color)}.day-axis{display:flex;justify-content:space-between;margin:12px 0 16px;font-size:10px;font-variant-numeric:tabular-nums;color:var(--secondary-text-color)}.timeline-detail{display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap;border-radius:8px;background:var(--secondary-background-color);padding:12px;font-size:13px}.timeline-detail>span{font-variant-numeric:tabular-nums;color:var(--secondary-text-color)}.timeline-detail strong{font-weight:550}.day-timeline .legend{margin:14px 0 8px}
   h3{margin:4px 0 0;font-size:18px;overflow-wrap:anywhere}h4{font-size:14px;margin:24px 0 10px}
   .view-tabs{display:flex;gap:5px;padding:0 22px 18px}.view-tabs button{border:0;border-radius:24px;padding:10px 20px}.view-tabs button[aria-selected=true]{background:var(--primary-color);color:var(--text-primary-color)}
   .day-tabs{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:20px 0 16px}.day-tabs button{padding:10px 0;font-size:12px}.day-tabs button[aria-pressed=true]{background:var(--primary-color);color:var(--text-primary-color);border-color:var(--primary-color)}

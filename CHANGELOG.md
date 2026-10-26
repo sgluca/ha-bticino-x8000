@@ -1,5 +1,10 @@
 # Development changelog
 
+## 1.3.0-beta.3 — unreleased
+
+- Display today's schedule as a proportional 00:00–24:00 timeline with preset colors, temperature labels and a current-time cursor.
+- Tap or keyboard-select a period to inspect its exact times; keep the text list collapsed by default.
+
 ## 1.3.0-beta.2 — unreleased
 
 - Simplify the editor with consultation first, explicit start/end periods, opt-in editing and secondary tools under More options.
