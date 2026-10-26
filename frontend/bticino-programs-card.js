@@ -1,4 +1,4 @@
-/* BTicino program editor. No external libraries, timers, cloud calls or credentials. */
+/* BTicino program editor. The display clock never sends thermostat commands. */
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const PRESETS = ["DAY", "NIGHT", "AWAY", "PROTECTION"];
 const LABELS = {
@@ -43,33 +43,43 @@ const LABELS = {
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clone = value => JSON.parse(JSON.stringify(value));
 const minutes = time => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+Object.assign(LABELS.it, { today: "Oggi", programs: "Programmi", editDay: "Modifica fasce", done: "Fine modifica", more: "Altre opzioni", until: "fino alle", from: "Dalle", to: "Alle", now: "Adesso", next: "Prossima fascia", tomorrow: "Domani", daily: "La giornata", actual: "Obiettivo attuale", noActive: "Nessun programma automatico in esecuzione", paused: "Il programma è sospeso: è attiva una forzatura o un’altra modalità.", scheduled: "Fasce previste dal programma", timezone: "Orari di Home Assistant", fullDay: "Tutto il giorno", readProgram: "Programma da consultare", todayTitle: "Termostato · oggi", chooseDay: "Scegli un giorno per vedere le fasce. Premi Modifica fasce per cambiarle.", clockNote: "La fascia è calcolata dall’orario di HA; l’obiettivo attuale è riportato dal termostato.", review: "Salva le modifiche prima di attivare il programma." });
+Object.assign(LABELS.en, { today: "Today", programs: "Programs", editDay: "Edit times", done: "Done editing", more: "More options", until: "until", from: "From", to: "To", now: "Now", next: "Next period", tomorrow: "Tomorrow", daily: "Today's schedule", actual: "Current target", noActive: "No automatic program running", paused: "The schedule is paused by an override or another mode.", scheduled: "Scheduled periods", timezone: "Home Assistant time", fullDay: "All day", readProgram: "Browse a program", todayTitle: "Thermostat · today", chooseDay: "Choose a day to see its periods. Use Edit times to change them.", clockNote: "The period is calculated using HA time; the current target is reported by the thermostat.", review: "Save changes before activating the program." });
 
 class BticinoProgramsCard extends HTMLElement {
   constructor() {
-    super(); this.attachShadow({ mode: "open" }); this._day = "monday"; this._busy = false;
+    super(); this.attachShadow({ mode: "open" }); this._day = "monday"; this._busy = false; this._profiles = {}; this._view = "programs";
     this.shadowRoot.addEventListener("click", event => this._click(event));
     this.shadowRoot.addEventListener("input", event => this._input(event));
     this.shadowRoot.addEventListener("change", event => this._change(event));
   }
+  connectedCallback() {
+    if (!this._clockTimer) this._clockTimer = setInterval(() => {
+      if (this._view === "today" && !this._busy) this._render();
+    }, 30000);
+  }
+  disconnectedCallback() { clearInterval(this._clockTimer); this._clockTimer = null; }
   setConfig(config) {
     if (!config.entity || !config.entity.startsWith("climate.")) throw new Error("Choose a climate entity");
     const changed = this._config?.entity !== config.entity;
-    this._config = { ...config }; if (changed) { this._generation = (this._generation || 0) + 1; this._catalog = null; this._draft = null; this._baseline = null; this._attempted = false; }
+    this._config = { ...config }; if (changed) { this._generation = (this._generation || 0) + 1; this._catalog = null; this._draft = null; this._baseline = null; this._attempted = false; this._profiles = {}; this._editing = false; }
     this._render(); if (this._hass && changed && !this._busy) this._load();
   }
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
     const state = hass.states?.[this._config.entity];
-    const signature = JSON.stringify([state?.state, state?.attributes?.program_number, state?.attributes?.current_function]);
+    const signature = JSON.stringify([state?.state, state?.attributes?.program_number, state?.attributes?.program_mode, state?.attributes?.current_function, state?.attributes?.temperature, state?.attributes?.current_temperature, hass.language, hass.config?.time_zone]);
     if (this._catalog && state && signature !== this._signature) {
       this._catalog.active_program = state.attributes.program_number;
       this._catalog.mode = state.attributes.program_mode;
       this._catalog.function = state.attributes.current_function;
+      this._catalog.connected = !["unavailable", "unknown"].includes(state.state);
     }
     if (!this._catalog && !this._busy && !this._attempted) this._load();
-    else if (signature !== this._signature && !this._busy && !this._dirty()) this._render();
+    else if (signature !== this._signature && !this._busy && (!this._dirty() || this._view === "today")) this._render();
     this._signature = signature;
+    if (this._catalog && !this._busy && this._view === "today") this._ensureActive();
   }
   getCardSize() { return 10; }
   getGridOptions() { return { columns: 12, min_columns: 6, rows: 10, min_rows: 8 }; }
@@ -117,12 +127,15 @@ class BticinoProgramsCard extends HTMLElement {
     for (const day of DAYS) this._draft.days[day] = (program.days[day] || []).map(({ time, preset }) => ({ time, preset }));
     this._revision = fresh ? null : program.sha256; this._original = clone(program);
     this._baseline = fresh ? null : JSON.stringify(this._draft);
+    if (!fresh) this._profiles[program.program_number] = clone(program);
+    this._editing = fresh;
   }
   async _load(refresh = false) {
     if (refresh && !this._canLeave()) return;
     this._attempted = true;
     await this._run(async () => {
       this._catalog = await this._api("list", { refresh });
+      this._profiles = {};
       if (refresh) this._message = this._t("loaded");
       const number = this._draft?.number ?? this._catalog.active_program;
       const record = this._catalog.programs.find(p => p.number === number && !p.error);
@@ -130,8 +143,15 @@ class BticinoProgramsCard extends HTMLElement {
         const result = await this._api("get", { number: record.number });
         this._catalog = result.catalog; this._setDraft(result.program);
       } else if (refresh) { this._draft = null; this._baseline = null; }
+      await this._fetchActive();
     });
   }
+  async _fetchActive() {
+    const number = this._catalog?.active_program;
+    if (number == null || this._profiles[number] || !this._catalog.programs.some(p => p.number === number && p.valid && !p.error)) return;
+    const data = await this._api("get", { number }); this._profiles[number] = clone(data.program); this._catalog = data.catalog;
+  }
+  _ensureActive() { const number = this._catalog?.active_program; if (!this._profiles[number] && this._catalog.programs.some(p => p.number === number && p.valid && !p.error)) this._run(() => this._fetchActive()); }
   async _open(number) {
     if (!this._canLeave()) return;
     await this._run(async () => { const data = await this._api("get", { number }); this._catalog = data.catalog; this._setDraft(data.program); });
@@ -142,7 +162,7 @@ class BticinoProgramsCard extends HTMLElement {
     if (number == null) { this._error = this._t("noSpace"); this._render(); return; }
     const days = duplicate && this._draft ? clone(this._draft.days) : Object.fromEntries(DAYS.map(d => [d, [{ time: "00:00", preset: "PROTECTION" }]]));
     const name = duplicate ? `${this._t("copyName")} ${this._draft.name}`.slice(0, 40) : this._t("newName");
-    this._setDraft({ program_number: number, name, days }, true); this._error = ""; this._message = ""; this._render();
+    this._view = "programs"; this._setDraft({ program_number: number, name, days }, true); this._error = ""; this._message = ""; this._render();
   }
   _validate(draft = this._draft) {
     if (!draft || !draft.name.trim() || draft.name.trim().length > 40 || Object.keys(draft.days).length !== 7) return false;
@@ -161,7 +181,7 @@ class BticinoProgramsCard extends HTMLElement {
   }
   async _activate(number) {
     if (!this._admin() || number == null) return;
-    await this._run(async () => { this._catalog = await this._api("activate", { number }); this._message = this._t("activated"); });
+    await this._run(async () => { this._catalog = await this._api("activate", { number }); await this._fetchActive(); this._message = this._t("activated"); });
   }
   async _delete() {
     if (!this._revision || !window.confirm(this._t("removeAsk"))) return;
@@ -200,6 +220,7 @@ class BticinoProgramsCard extends HTMLElement {
     if (el.dataset.field === "preset") this._draft.days[this._day][Number(el.dataset.index)].preset = el.value;
     this._updateDirty();
     const preview = this.shadowRoot.querySelector(".week-preview"); if (preview) preview.innerHTML = this._weekMarkup();
+    this.shadowRoot.querySelectorAll(".slot-end").forEach((node, i) => { node.textContent = this._draft.days[this._day][i + 1]?.time || "24:00"; });
   }
   _change(event) {
     const el = event.target;
@@ -213,6 +234,8 @@ class BticinoProgramsCard extends HTMLElement {
     const action = el.dataset.action;
     if (el.disabled) return;
     if (action === "refresh") this._load(true);
+    else if (action === "view") { this._view = el.dataset.view; this._render(); if (this._view === "today") this._ensureActive(); }
+    else if (action === "edit-day") { this._editing = !this._editing; this._render(); }
     else if (action === "open") this._open(Number(el.dataset.number));
     else if (action === "new") this._new();
     else if (action === "duplicate") this._new(true);
@@ -257,34 +280,72 @@ class BticinoProgramsCard extends HTMLElement {
     const discard = this.shadowRoot.querySelector("[data-action=discard]");
     if (discard) discard.disabled = this._busy || !this._dirty();
     const flag = this.shadowRoot.querySelector(".dirty"); if (flag) flag.hidden = !this._dirty();
+    const picker = this.shadowRoot.querySelector("[data-field=active]"); if (picker) picker.disabled = this._busy || !this._admin() || this._dirty();
+  }
+  _clock() {
+    const zone = this._hass?.config?.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date()).map(p => [p.type, p.value]));
+    return { day: parts.weekday.toLowerCase(), time: `${parts.hour}:${parts.minute}`, minute: Number(parts.hour) * 60 + Number(parts.minute), zone };
+  }
+  _periods(slots, current = -1) {
+    return `<ol class="periods">${slots.map((slot, i) => `<li class="period ${i === current ? "current" : ""}"><span class="period-time">${esc(slot.time)} <span>–</span> ${esc(slots[i + 1]?.time || "24:00")}</span><strong class="${slot.preset.toLowerCase()}"><i></i>${esc(this._presetLabel(slot.preset))}</strong>${i === current ? `<span class="now-badge">${esc(this._t("now"))}</span>` : ""}</li>`).join("")}</ol>`;
+  }
+  _todayMarkup() {
+    const catalog = this._catalog, clock = this._clock(), state = this._hass?.states?.[this._config.entity];
+    const profile = this._profiles[catalog?.active_program];
+    const running = catalog?.connected && catalog.mode === "AUTOMATIC" && state?.state !== "off";
+    const slots = profile?.days?.[clock.day] || [];
+    let current = -1;
+    if (running) slots.forEach((slot, i) => { if (minutes(slot.time) <= clock.minute) current = i; });
+    const next = current >= 0 ? slots[current + 1] : null;
+    const tomorrow = profile?.days?.[DAYS[(DAYS.indexOf(clock.day) + 1) % 7]]?.[0];
+    const target = catalog?.connected ? state?.attributes?.temperature : null;
+    return `<section class="today-panel" aria-label="${esc(this._t("today"))}">
+      <div class="today-heading"><div><span class="eyebrow">${esc(this._t("today"))} · ${esc(this._t("weekdaysLong")[DAYS.indexOf(clock.day)])}</span><h3>${esc(profile?.name || this._t("noActive"))}</h3></div><time>${esc(clock.time)}</time></div>
+      ${!catalog?.connected ? `<p class="notice" role="status">${esc(this._t("offline"))}</p>` : !running ? `<p class="notice" role="status">${esc(this._t("paused"))}</p>` : ""}
+      <div class="today-summary"><div class="current-period"><span class="eyebrow">${esc(running && current >= 0 ? this._t("now") : this._t("actual"))}</span><strong>${esc(running && current >= 0 ? this._presetLabel(slots[current].preset) : target == null ? "—" : `${target} °${this._hass?.config?.unit_system?.temperature || "C"}`)}</strong>${running && current >= 0 ? `<span>${esc(this._t("until"))} ${esc(slots[current + 1]?.time || "24:00")}</span>` : ""}</div>
+      ${running && current >= 0 && (next || tomorrow) ? `<div class="next-period"><span class="eyebrow">${esc(this._t("next"))}</span><strong>${esc(this._presetLabel((next || tomorrow).preset))}</strong><span>${next ? esc(next.time) : `${esc(this._t("tomorrow"))} ${esc(tomorrow.time)}`}</span></div>` : ""}</div>
+      ${running && target != null ? `<p class="actual-target">${esc(this._t("actual"))}: <strong>${esc(target)} °${esc(this._hass?.config?.unit_system?.temperature || "C")}</strong></p>` : ""}
+      <h4>${esc(running ? this._t("daily") : this._t("scheduled"))}</h4>
+      ${slots.length ? this._periods(slots, current) : `<p class="empty">${esc(this._t("empty"))}</p>`}
+      <p class="footnote">${esc(this._t("timezone"))}: ${esc(clock.zone)}. ${esc(this._t("clockNote"))}</p>
+      ${catalog?.temperature_warning ? `<p class="footnote">${esc(this._t("uncertain"))}</p>` : ""}
+    </section>`;
+  }
+  _editorMarkup(disabled) {
+    const draft = this._draft, catalog = this._catalog, admin = this._admin(), readOnly = this._readOnly(), noSlots = !catalog?.free_slots?.length;
+    const active = catalog?.mode === "AUTOMATIC" ? catalog.active_program : null;
+    if (!draft) return `<p class="empty editor-empty">${esc(this._t("selectFirst"))}</p>`;
+    const slots = draft.days[this._day];
+    return `<div class="program-heading">${this._editing ? `<label class="name-label">${esc(this._t("name"))}<input maxlength="40" data-field="name" value="${esc(draft.name)}" ${disabled} ${readOnly ? "disabled" : ""}></label>` : `<div><span class="eyebrow">${esc(this._t("readProgram"))}</span><h3>${esc(draft.name)}</h3></div>`}
+      <button data-action="edit-day" ${disabled} ${readOnly ? "disabled" : ""}>${esc(this._t(this._editing ? "done" : "editDay"))}</button></div>
+      ${draft.number === 0 ? `<p class="notice">${esc(this._t("readOnly"))}</p>` : ""}
+      ${draft.number === active && this._editing && !readOnly ? `<p class="notice">${esc(this._t("activeEdit"))}</p>` : ""}
+      <section aria-label="${esc(this._t("week"))}">${this._editing ? `<div class="day-tabs">${DAYS.map((day, i) => `<button data-action="day" data-day="${day}" aria-pressed="${this._day === day}">${esc(this._t("weekdaysShort")[i])}</button>`).join("")}</div>` : `<p class="footnote">${esc(this._t("chooseDay"))}</p><div class="week-preview">${this._weekMarkup()}</div>`}</section>
+      <section class="day-editor"><h3>${esc(this._t("weekdaysLong")[DAYS.indexOf(this._day)])}</h3>
+      ${!this._editing ? this._periods(slots) : `<div class="slot-head"><span>${esc(this._t("from"))}</span><span>${esc(this._t("to"))}</span><span>${esc(this._t("level"))}</span><span></span></div>
+      ${slots.map((slot, i) => `<div class="slot-row"><input type="time" step="60" data-field="time" data-index="${i}" aria-label="${esc(this._t("hour"))} ${i + 1}" value="${esc(slot.time)}" ${disabled} ${readOnly || i === 0 ? "disabled" : ""}><span class="slot-end">${esc(slots[i + 1]?.time || "24:00")}</span><select data-field="preset" data-index="${i}" aria-label="${esc(this._t("level"))} ${i + 1}" ${disabled} ${readOnly ? "disabled" : ""}>${PRESETS.map(p => `<option value="${p}" ${p === slot.preset ? "selected" : ""}>${esc(this._presetLabel(p))}</option>`).join("")}</select><button data-action="remove-slot" data-index="${i}" title="${esc(this._t("deleteSlot"))}" aria-label="${esc(this._t("deleteSlot"))} ${i + 1}" ${disabled} ${readOnly || i === 0 ? "disabled" : ""}>×</button></div>`).join("")}
+      <button data-action="add-slot" ${disabled} ${readOnly || slots.length >= 8 ? "disabled" : ""}>＋ ${esc(this._t("add"))}</button>
+      <details class="copy-options"><summary>${esc(this._t("copy"))}</summary><div class="copy-row"><label>${esc(this._t("copy"))}<select data-field="copy-target" ${disabled} ${readOnly ? "disabled" : ""}><option value="all">${esc(this._t("all"))}</option><option value="weekdays">${esc(this._t("weekdays"))}</option><option value="weekend">${esc(this._t("weekend"))}</option>${DAYS.map((d, i) => `<option value="${d}">${esc(this._t("weekdaysLong")[i])}</option>`).join("")}</select></label><button data-action="copy" ${disabled} ${readOnly ? "disabled" : ""}>${esc(this._t("applyCopy"))}</button></div></details>`}</section>
+      <div class="save-row"><div><span class="dirty" ${this._dirty() ? "" : "hidden"}>${esc(this._t("unsaved"))}</span><button data-action="discard" ${disabled} ${!this._dirty() ? "disabled" : ""}>${esc(this._t("discard"))}</button></div><button class="primary" data-action="save" ${disabled} ${readOnly || !this._dirty() ? "disabled" : ""}>${esc(this._t("save"))}</button></div>
+      <details class="more-options"><summary>${esc(this._t("more"))}</summary><div class="program-tools"><button data-action="duplicate" ${disabled} ${!admin || noSlots ? "disabled" : ""}>${esc(this._t("duplicate"))}</button><button data-action="export" ${disabled}>${esc(this._t("export"))}</button><button data-action="import" ${disabled} ${!admin || noSlots ? "disabled" : ""}>${esc(this._t("import"))}</button>${this._revision && draft.number > 0 ? `<button data-action="activate" ${disabled} ${!admin || this._dirty() ? "disabled" : ""}>${esc(this._t("activate"))}</button>` : ""}</div>
+      ${!this._revision ? `<label class="number-label">${esc(this._t("slot"))}<select data-field="number" ${disabled} ${readOnly ? "disabled" : ""}>${catalog.free_slots.map(n => `<option value="${n}" ${n === draft.number ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}
+      <div class="legend">${PRESETS.map(p => `<span><i class="${p.toLowerCase()}"></i>${esc(this._presetLabel(p))}</span>`).join("")}</div><p class="footnote">${esc(this._t("presetNote"))} ${esc(!catalog.temperatures ? this._t("missingTemps") : catalog.temperature_warning ? this._t("uncertain") : "")}</p>
+      ${this._revision && draft.number > 0 ? `<button class="delete" data-action="delete" ${disabled} ${readOnly || draft.number === catalog.active_program ? "disabled" : ""}>${esc(this._t("remove"))}</button>` : ""}</details>`;
   }
   _render() {
     if (!this._config) return;
-    const catalog = this._catalog, draft = this._draft, readOnly = this._readOnly(), disabled = this._busy ? "disabled" : "";
+    const catalog = this._catalog, draft = this._draft, disabled = this._busy ? "disabled" : "";
     const records = catalog?.programs || [], active = catalog?.mode === "AUTOMATIC" ? catalog.active_program : null;
-    const noSlots = !catalog?.free_slots?.length, admin = this._admin();
-    const options = records.filter(p => p.number > 0 && p.valid && !p.error).map(p => `<option value="${p.number}" ${p.number === active ? "selected" : ""}>${esc(p.name)}</option>`).join("");
-    this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card>
-      <header><div><h2>${esc(this._config.title || this._t("title"))}</h2><div class="subtitle">${esc(this._hass?.states?.[this._config.entity]?.attributes?.friendly_name || "")}</div></div><button data-action="refresh" ${disabled}>↻ ${esc(this._t("refresh"))}</button></header>
-      <div class="active-picker"><label>${esc(this._t("active"))}<select data-field="active" ${disabled} ${!admin ? "disabled" : ""}><option value="" ${active == null ? "selected" : ""}>${esc(this._t("choose"))}</option>${options}</select></label><span class="mode">${esc(!catalog?.connected ? this._t("offline") : catalog?.mode === "AUTOMATIC" ? this._t("automatic") : this._t("manual"))}</span></div>
-      ${this._error ? `<div class="notice error" role="alert">${esc(this._error)}</div>` : ""}
-      ${this._message ? `<div class="notice success" role="status">${esc(this._message)}</div>` : ""}
-      ${this._busy ? `<div class="loading" role="status">${esc(this._t("loading"))}</div>` : ""}
-      <div class="workspace"><aside><div class="list-actions"><button data-action="new" ${disabled} ${!admin || noSlots ? "disabled" : ""}>＋ ${esc(this._t("create"))}</button><button data-action="import" ${disabled} ${!admin || noSlots ? "disabled" : ""}>${esc(this._t("import"))}</button><input hidden type="file" accept=".json,application/json" data-field="import"></div>
-      <nav aria-label="${esc(this._t("title"))}">${records.map(p => `<button class="program ${draft?.number === p.number && this._revision ? "selected" : ""}" data-action="open" data-number="${p.number}" ${disabled} ${p.error ? "disabled" : ""}><span class="program-name">${esc(p.name)}</span><span class="program-meta">${p.number === 0 ? esc(this._t("default")) : `#${p.number}`} ${p.number === active ? `· ${esc(this._t("active"))}` : ""}</span></button>`).join("") || `<p class="empty">${esc(this._t("empty"))}</p>`}</nav></aside>
-      <main>${draft ? `<div class="program-heading"><label class="name-label">${esc(this._t("name"))}<input maxlength="40" data-field="name" value="${esc(draft.name)}" ${disabled} ${readOnly ? "disabled" : ""}></label><label class="number-label">${esc(this._t("slot"))}<select data-field="number" ${disabled} ${this._revision || readOnly ? "disabled" : ""}>${(this._revision ? [draft.number] : catalog.free_slots).map(n => `<option value="${n}" ${n === draft.number ? "selected" : ""}>${n}</option>`).join("")}</select></label></div>
-      <div class="program-tools"><button data-action="duplicate" ${disabled} ${!admin || noSlots ? "disabled" : ""}>${esc(this._t("duplicate"))}</button><button data-action="export" ${disabled}>${esc(this._t("export"))}</button>${this._revision && draft.number > 0 ? `<button data-action="activate" ${disabled} ${!admin || this._dirty() ? "disabled" : ""}>${esc(this._t("activate"))}</button>` : ""}</div>
-      ${draft.number === 0 ? `<p class="notice">${esc(this._t("readOnly"))}</p>` : ""}
-      ${draft.number === active && !readOnly ? `<p class="notice">${esc(this._t("activeEdit"))}</p>` : ""}
-      <section aria-label="${esc(this._t("week"))}"><div class="legend">${PRESETS.map(p => `<span><i class="${p.toLowerCase()}"></i>${esc(this._presetLabel(p))}</span>`).join("")}</div><div class="week-preview">${this._weekMarkup()}</div></section>
-      <section class="day-editor"><h3>${esc(this._t("weekdaysLong")[DAYS.indexOf(this._day)])}</h3><div class="slot-head"><span>${esc(this._t("hour"))}</span><span>${esc(this._t("level"))}</span><span></span></div>
-      ${draft.days[this._day].map((slot, i) => `<div class="slot-row"><input type="time" step="60" data-field="time" data-index="${i}" aria-label="${esc(this._t("hour"))} ${i + 1}" value="${esc(slot.time)}" ${disabled} ${readOnly || i === 0 ? "disabled" : ""}><select data-field="preset" data-index="${i}" aria-label="${esc(this._t("level"))} ${i + 1}" ${disabled} ${readOnly ? "disabled" : ""}>${PRESETS.map(p => `<option value="${p}" ${p === slot.preset ? "selected" : ""}>${esc(this._presetLabel(p))}</option>`).join("")}</select><button data-action="remove-slot" data-index="${i}" title="${esc(this._t("deleteSlot"))}" aria-label="${esc(this._t("deleteSlot"))} ${i + 1}" ${disabled} ${readOnly || i === 0 ? "disabled" : ""}>×</button></div>`).join("")}
-      <button data-action="add-slot" ${disabled} ${readOnly || draft.days[this._day].length >= 8 ? "disabled" : ""}>＋ ${esc(this._t("add"))}</button>
-      <div class="copy-row"><label>${esc(this._t("copy"))}<select data-field="copy-target" ${disabled} ${readOnly ? "disabled" : ""}><option value="all">${esc(this._t("all"))}</option><option value="weekdays">${esc(this._t("weekdays"))}</option><option value="weekend">${esc(this._t("weekend"))}</option>${DAYS.map((d, i) => `<option value="${d}">${esc(this._t("weekdaysLong")[i])}</option>`).join("")}</select></label><button data-action="copy" ${disabled} ${readOnly ? "disabled" : ""}>${esc(this._t("applyCopy"))}</button></div></section>
-      <p class="footnote">${esc(this._t("presetNote"))} ${esc(!catalog.temperatures ? this._t("missingTemps") : catalog.temperature_warning ? this._t("uncertain") : "")}</p>
-      <div class="save-row"><div><span class="dirty" ${this._dirty() ? "" : "hidden"}>${esc(this._t("unsaved"))}</span><button data-action="discard" ${disabled} ${!this._dirty() ? "disabled" : ""}>${esc(this._t("discard"))}</button></div><button class="primary" data-action="save" ${disabled} ${readOnly || !this._dirty() ? "disabled" : ""}>${esc(this._t("save"))}</button></div>
-      ${this._revision && draft.number > 0 ? `<button class="delete" data-action="delete" ${disabled} ${readOnly || draft.number === catalog.active_program ? "disabled" : ""}>${esc(this._t("remove"))}</button>` : ""}` : `<p class="empty editor-empty">${esc(this._t("selectFirst"))}</p>`}</main></div>
-      <footer>${esc(this._t("note"))}${!admin ? `<br>${esc(this._t("admin"))}` : ""}</footer></ha-card>`;
+    const noSlots = !catalog?.free_slots?.length, admin = this._admin(), todayOnly = this._todayOnly;
+    const options = records.filter(p => p.number > 0 && p.valid && !p.error).map(p => `<option value="${p.number}" ${p.number === active ? "selected" : ""}>${esc(p.name)} · #${p.number}</option>`).join("");
+    this.shadowRoot.innerHTML = `<style>${STYLE}${SIMPLE_STYLE}</style><ha-card>
+      <header><div><h2>${esc(this._config.title || this._t(todayOnly ? "todayTitle" : "title"))}</h2><div class="subtitle">${esc(this._hass?.states?.[this._config.entity]?.attributes?.friendly_name || "")}</div></div><button data-action="refresh" ${disabled}>↻ ${esc(this._t("refresh"))}</button></header>
+      ${!todayOnly ? `<div class="view-tabs" role="tablist">${["programs", "today"].map(view => `<button role="tab" aria-selected="${this._view === view}" data-action="view" data-view="${view}">${esc(this._t(view))}</button>`).join("")}</div>` : ""}
+      ${this._error ? `<div class="notice error" role="alert">${esc(this._error)}</div>` : ""}${this._message ? `<div class="notice success" role="status">${esc(this._message)}</div>` : ""}${this._busy ? `<div class="loading" role="status">${esc(this._t("loading"))}</div>` : ""}
+      ${this._view === "today" ? this._todayMarkup() : `<div class="active-picker"><label>${esc(this._t("active"))}<select data-field="active" ${disabled} ${!admin || this._dirty() ? "disabled" : ""}><option value="" ${active == null ? "selected" : ""}>${esc(this._t("choose"))}</option>${options}</select></label><span class="mode">${esc(!catalog?.connected ? this._t("offline") : catalog?.mode === "AUTOMATIC" ? this._t("automatic") : this._t("manual"))}</span></div>
+      <div class="workspace"><aside><div class="list-actions"><button data-action="new" ${disabled} ${!admin || noSlots ? "disabled" : ""}>＋ ${esc(this._t("create"))}</button></div><nav aria-label="${esc(this._t("readProgram"))}">${records.map(p => `<button class="program ${draft?.number === p.number && this._revision ? "selected" : ""}" data-action="open" data-number="${p.number}" ${disabled} ${p.error ? "disabled" : ""}><span class="program-name">${esc(p.name)}</span><span class="program-meta">${p.number === 0 ? esc(this._t("default")) : `#${p.number}`} ${p.number === active ? `· ${esc(this._t("active"))}` : ""}</span></button>`).join("") || `<p class="empty">${esc(this._t("empty"))}</p>`}</nav></aside><main>${this._editorMarkup(disabled)}</main></div>`}
+      ${!todayOnly ? `<input hidden type="file" accept=".json,application/json" data-field="import"><footer>${esc(this._t("note"))}${!admin ? `<br>${esc(this._t("admin"))}` : ""}</footer>` : ""}</ha-card>`;
   }
 }
 
@@ -301,6 +362,23 @@ const STYLE = `
   @media(max-width:600px){.workspace{grid-template-columns:1fr}aside{padding:10px}nav{flex-direction:row;overflow:auto}.program{min-width:135px;max-width:190px}.list-actions{justify-content:flex-start;margin-bottom:8px}.list-actions button{flex:0 1 auto}.program-meta{font-size:10px}header{padding:16px}.active-picker{padding:0 16px 14px;gap:8px}h2{font-size:19px}main{padding:15px}.save-row{align-items:stretch}.save-row button{font-size:12px}.mode{max-width:90px}.slot-row,.slot-head{grid-template-columns:90px minmax(0,1fr) 28px}}
 `;
 
+const SIMPLE_STYLE = `
+  h3{margin:4px 0 0;font-size:18px;overflow-wrap:anywhere}h4{font-size:14px;margin:24px 0 10px}
+  .view-tabs{display:flex;gap:5px;padding:0 22px 18px}.view-tabs button{border:0;border-radius:24px;padding:10px 20px}.view-tabs button[aria-selected=true]{background:var(--primary-color);color:var(--text-primary-color)}
+  .day-tabs{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:20px 0 16px}.day-tabs button{padding:10px 0;font-size:12px}.day-tabs button[aria-pressed=true]{background:var(--primary-color);color:var(--text-primary-color);border-color:var(--primary-color)}
+  .program-heading{justify-content:space-between;align-items:center;gap:12px}.program-heading>div,.name-label{min-width:0}.name-label input{width:100%}.program-heading>button{flex-shrink:0}.eyebrow{text-transform:uppercase;letter-spacing:.07em;font-size:10px;color:var(--secondary-text-color)}
+  .periods{list-style:none;padding:0;margin:12px 0}.period{display:flex;align-items:center;gap:12px;padding:13px 10px;border-bottom:1px solid var(--divider-color);flex-wrap:wrap;font-size:13px}.period-time{font-variant-numeric:tabular-nums;color:var(--secondary-text-color);white-space:nowrap}.period-time>span{opacity:.5;margin:0 2px}.period strong{display:flex;align-items:center;gap:8px;font-weight:550}.period i{display:block;width:9px;height:9px;border-radius:50%;background:var(--tone)}.period.current{border-radius:10px;border:1px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 8%,transparent)}.now-badge{font-size:10px;color:var(--primary-color);margin-left:auto;font-weight:600}
+  .slot-row,.slot-head{grid-template-columns:90px 48px minmax(0,1fr) 28px}.slot-end{font-size:12px;color:var(--secondary-text-color);font-variant-numeric:tabular-nums}.copy-options{margin:15px 0}.more-options{margin-top:18px;border-top:1px solid var(--divider-color);padding-top:14px}summary{cursor:pointer;font-size:12px;color:var(--secondary-text-color);padding:8px 0}details[open]>summary{color:var(--primary-text-color)}.program-tools{margin-top:12px}.save-row{margin-top:16px;position:sticky;bottom:0;background:var(--ha-card-background,var(--card-background-color));padding-bottom:12px;z-index:1}.save-row:not(:has(.dirty:not([hidden]))){display:none}.day-editor{padding-bottom:0}
+  .today-panel{padding:6px 22px 18px}.today-heading{display:flex;align-items:center;justify-content:space-between;gap:14px}.today-heading h3{font-size:22px;margin-top:6px}.today-heading time{font-size:24px;font-variant-numeric:tabular-nums;letter-spacing:-1px;color:var(--secondary-text-color)}.today-summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}.today-summary>div{display:flex;flex-direction:column;gap:9px;border-radius:12px;padding:18px;background:var(--secondary-background-color)}.today-summary strong{font-size:21px;font-weight:550;overflow-wrap:anywhere}.today-summary>div>span:last-child{font-size:12px;color:var(--secondary-text-color)}.current-period{border-left:3px solid var(--primary-color)}.actual-target{font-size:12px;color:var(--secondary-text-color)}
+  @media(max-width:600px){.today-panel{padding:5px 16px 16px}.view-tabs{padding-left:16px}.program-heading{align-items:flex-start}.program-heading>button{font-size:12px;padding:8px}.slot-row,.slot-head{grid-template-columns:78px 40px minmax(0,1fr) 24px;gap:5px}.slot-row select{padding:8px 3px;font-size:12px}.slot-row input{padding:8px 3px}.today-summary{gap:8px}.today-summary>div{padding:13px}.today-summary strong{font-size:18px}.today-heading h3{font-size:19px}.period{gap:8px;padding:12px 6px}.period strong{font-size:12px}.now-badge{font-size:9px}}
+`;
+
+class BticinoTodayCard extends BticinoProgramsCard {
+  constructor() { super(); this._todayOnly = true; this._view = "today"; }
+  getCardSize() { return 5; }
+  getGridOptions() { return { columns: 12, min_columns: 6, rows: 6, min_rows: 4 }; }
+}
+
 class BticinoProgramsCardEditor extends HTMLElement {
   setConfig(config) { this._config = { ...config }; this._render(); }
   set hass(hass) { const changed = hass.language !== this._hass?.language; this._hass = hass; if (changed && this._config) { this._render(); return; } const picker = this.querySelector("ha-entity-picker"); if (picker) picker.hass = hass; }
@@ -316,6 +394,8 @@ class BticinoProgramsCardEditor extends HTMLElement {
   _change(key, value) { this._config = { ...this._config, [key]: value }; this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config }, bubbles: true, composed: true })); }
 }
 if (!customElements.get("bticino-programs-card")) customElements.define("bticino-programs-card", BticinoProgramsCard);
+if (!customElements.get("bticino-today-card")) customElements.define("bticino-today-card", BticinoTodayCard);
 if (!customElements.get("bticino-programs-card-editor")) customElements.define("bticino-programs-card-editor", BticinoProgramsCardEditor);
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === "bticino-programs-card")) window.customCards.push({ type: "bticino-programs-card", name: "BTicino Programs", description: "Weekly programs stored on the thermostat", preview: false });
+if (!window.customCards.some(c => c.type === "bticino-today-card")) window.customCards.push({ type: "bticino-today-card", name: "BTicino Today", description: "Today's active program, current period and next change", preview: false });

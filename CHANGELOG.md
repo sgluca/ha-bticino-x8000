@@ -1,5 +1,12 @@
 # Development changelog
 
+## 1.3.0-beta.2 — unreleased
+
+- Simplify the editor with consultation first, explicit start/end periods, opt-in editing and secondary tools under More options.
+- Add a read-only Today tab and standalone `custom:bticino-today-card`: saved active program, current/next period and actual target temperature.
+- Use HA's time zone for day selection; update the display across schedule boundaries and midnight without thermostat polling.
+- Keep Today independent of unsaved drafts; handle manual overrides, offline status and active-program changes explicitly.
+
 ## 1.3.0-beta.1 — unreleased
 
 - Add a bundled Italian/English weekly-program dashboard card with responsive week timelines, day editing/copying, create/duplicate, JSON import/export, save verification and inactive-program deletion.

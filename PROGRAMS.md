@@ -2,7 +2,7 @@
 
 The editor writes complete weekly profiles into the thermostat. Home Assistant does not send temperatures at every transition: the device executes the saved schedule independently.
 
-This is a development build based on Mirmanero/ha-bticino-x8000, not an upstream release. Create/read-back was verified on one X8000 Gen 1; the complete HA editor, editing existing files, deletion and native select still need a supervised test on the actual HA instance before a stable release or PR.
+This is a development build based on Mirmanero/ha-bticino-x8000, not an upstream release. Create/read-back was verified on one X8000 Gen 1 and the user reports the first HA beta works. The simplified editor and Today card in beta.2 have browser coverage; detailed device acceptance checks remain before a stable release.
 
 ## Install
 
@@ -10,7 +10,7 @@ This is a development build based on Mirmanero/ha-bticino-x8000, not an upstream
 2. Replace its complete contents with the development package, including `frontend/`, `program_manager.py`, `program_api.py`, and `button.py`.
 3. Restart Home Assistant. Keep the existing integration/configuration; no PIN/account re-entry or thermostat reset is required. Re-enable the local integration if it was disabled for a separate VPN client.
 4. Under **Settings → Dashboards → Resources**, add:
-   - URL: `/bticino_thermostat_static/bticino-programs-card.js?v=1.3.0-beta.1`
+   - URL: `/bticino_thermostat_static/bticino-programs-card.js?v=1.3.0-beta.2`
    - Type: **JavaScript module**.
 5. Reload the browser, then add **BTicino Programs** from the dashboard card picker and choose the climate entity. The visual configuration editor only needs the thermostat and an optional title.
 
@@ -31,6 +31,7 @@ Italian installation/use guide: [PROGRAMS-IT.md](PROGRAMS-IT.md).
 
 - The top menu activates a saved program, keeping the current heating/cooling function and cancelling manual overrides with `AUTOMATIC`.
 - Select a program in the list to inspect its week and edit one day. Each slot marks the start of a preset until the next slot, or midnight at the end of that day.
+- Consultation is the default: select a day to see explicit start/end periods, then use **Edit times** to change them. **Done editing** returns to consultation without saving. Confirm changes with **Save to thermostat**. Copying appears while editing; duplicate, import/export and deletion are under **More options**.
 - Every day starts at `00:00`. Keep strictly increasing times; `24:00` is shown only as the end of a day, never entered as a slot.
 - Create a program in a free device slot, duplicate one, or import a JSON export. Import creates a new draft in a free slot; it never overwrites a program by itself.
 - Copy the current day to all days, weekdays, the weekend, or one specific day.
@@ -38,6 +39,19 @@ Italian installation/use guide: [PROGRAMS-IT.md](PROGRAMS-IT.md).
 - Editing an active program updates the schedule in use. The editor displays that fact before saving. Start testing with a duplicate or an inactive program.
 - Delete asks for confirmation. Program zero, the active program and programs whose current revision cannot be verified cannot be deleted. Resume Automatic mode before deleting programs.
 - Refresh reads names/profiles changed in the official app. No program polling loop or cloud API subscription is introduced.
+
+## Today dashboard card
+
+The editor has a **Today** tab. The same JavaScript resource also registers a separate read-only **BTicino Today** card with a visual entity picker:
+
+```yaml
+type: custom:bticino-today-card
+entity: climate.your_thermostat
+```
+
+It shows the saved active program, today's complete periods, the predicted current period, the next period and the target temperature reported by the climate entity. It always uses the active saved profile, independently of the editor's selected program or unsaved draft.
+
+The display uses HA's configured time zone and the browser clock. It updates every 30 seconds and changes weekday at midnight without making device requests. A predicted period is not confirmation of the thermostat's clock or relay state. Manual/Boost/Protection/Off and unavailable states suppress the running highlight and next-period prediction; cached periods may still be shown for reference. Refresh to retrieve external profile edits. Active-program changes reported by the climate entity load the newly selected profile. Removing a card clears its display timer.
 
 ## Native entities
 

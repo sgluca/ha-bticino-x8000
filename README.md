@@ -1,6 +1,6 @@
 # BTicino Thermostat for Home Assistant
 
-> **Development build 1.3.0-beta.1:** adds local weekly-program management and a bundled dashboard card. See [program editor installation and limitations](PROGRAMS.md) before testing. This is not an upstream release.
+> **Development build 1.3.0-beta.2:** adds local weekly-program management, a simplified editor and a read-only Today dashboard card. See [program editor installation and limitations](PROGRAMS.md) before testing. This is not an upstream release.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
@@ -17,6 +17,7 @@ Unofficial custom integration for [Home Assistant](https://www.home-assistant.io
 ## Features
 
 - Weekly program editor: create, duplicate, edit/copy days, import/export and save complete schedules to the thermostat.
+- Today view and standalone card: saved active program, today's periods, predicted current/next period and actual target temperature.
 - Native active-program select and program-refresh button.
 - Revision checks, backups before edits/deletions, and checksum-verified read-back.
 

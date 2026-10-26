@@ -1,4 +1,4 @@
-# Gestione programmi BTicino — beta 1.3.0
+# Gestione programmi BTicino — beta 1.3.0-beta.2
 
 Questa versione aggiunge un editor grafico e una selezione del programma attivo. I programmi sono salvati nel termostato: HA serve per modificarli o selezionarli, non per inviare una temperatura a ogni fascia.
 
@@ -10,7 +10,7 @@ Questa versione aggiunge un editor grafico e una selezione del programma attivo.
 4. Apri **Impostazioni → Plance → menu in alto a destra → Risorse** e aggiungi:
 
    ```text
-   /bticino_thermostat_static/bticino-programs-card.js?v=1.3.0-beta.1
+   /bticino_thermostat_static/bticino-programs-card.js?v=1.3.0-beta.2
    ```
 
    Scegli il tipo **Modulo JavaScript**. Se la gestione delle risorse è configurata in YAML, aggiungi lo stesso URL come risorsa `module` nella configurazione esistente.
@@ -28,12 +28,30 @@ Sostituisci l'entità con quella del dispositivo. Non serve copiare JavaScript i
 
 ## Cosa trovi
 
+- Due viste: **Programmi** per consultare/modificare la settimana e **Oggi** per la giornata del programma in esecuzione.
 - In alto: selezione del programma da attivare.
 - A lato, o in alto sul telefono: elenco dei programmi salvati.
 - Una vista delle fasce di tutta la settimana.
 - Per ogni giorno: orari, livelli e copia delle fasce ad altri giorni.
 - Creazione, duplicazione, importazione/esportazione JSON e salvataggio sul termostato.
 - Eliminazione di programmi non attivi, con conferma.
+
+Per cambiare le fasce, scegli un programma e un giorno, poi premi **Modifica fasce**. Ogni riga mostra inizio, fine e livello: la fine è ricavata dall'inizio della fascia successiva. **Fine modifica** torna alla consultazione senza salvare; premi **Salva sul termostato** per confermare le modifiche. La copia dei giorni è disponibile durante la modifica. Duplicazione, importazione, esportazione ed eliminazione sono raccolte in **Altre opzioni**.
+
+## Scheda Oggi per la plancia
+
+La stessa risorsa JavaScript registra anche **BTicino Today**, una scheda di sola consultazione. Aggiungila dall'elenco schede, oppure usa:
+
+```yaml
+type: custom:bticino-today-card
+entity: climate.il_tuo_termostato
+```
+
+Mostra il programma attivo, tutte le fasce del giorno, la fascia prevista adesso, la prossima e l'obiettivo attuale riportato dal termostato. La fascia prevista usa il fuso orario configurato in Home Assistant e l'orologio del browser: non è una conferma del relè o dell'orologio interno del dispositivo. La schermata aggiorna l'orario ogni 30 secondi, senza inviare comandi al termostato; a mezzanotte cambia giorno automaticamente.
+
+Durante Manuale, Boost, Protezione o Off, il programma non viene mostrato come in esecuzione. Se il dispositivo è scollegato, le eventuali fasce memorizzate restano consultabili ma non sono evidenziate come attive. Premi **Aggiorna** per rileggere modifiche fatte nell'app. La vista Oggi usa sempre il programma salvato e attivo, anche se stai modificando una bozza diversa nell'editor.
+
+## Fasce e livelli
 
 Il primo orario è sempre `00:00`; ogni livello resta valido fino all'orario successivo. Per una fase 10:00–11:00, inserisci il livello desiderato alle 10:00 e quello successivo alle 11:00. Sono consentite fino a otto fasce per giorno in questa beta.
 
